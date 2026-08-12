@@ -1,0 +1,6 @@
+pandas
+requests
+openpyxl
+sidrapy
+wbgapi
+xlsxwriter

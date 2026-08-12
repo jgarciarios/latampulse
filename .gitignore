@@ -1,0 +1,26 @@
+# Datos — el raw y processed no van al repo
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Credenciales / config local
+.env
+config.local.yaml
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# Power BI
+*.pbix.bak
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
