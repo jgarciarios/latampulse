@@ -1,5 +1,10 @@
 """
 dashboard/app.py — Dashboard interactivo de LatamPulse.
+
+Lee de data/processed/ (mismo dato que el notebook, mismo origen que
+Postgres) — no depende de que Docker/Postgres estén corriendo, lo que
+lo hace apto para deploy en Streamlit Community Cloud sin config extra.
+
 Corré con: streamlit run dashboard/app.py
 """
 
@@ -33,6 +38,13 @@ def load_data():
 
 
 def compute_monthly_pct(country_code: str, config: dict, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normaliza las 4 fuentes de inflación a variación mensual (%) comparable.
+    Ver AGENTS.md para el detalle de por qué esto no es trivial: 2 de las
+    4 fuentes dan nivel de índice (no variación), y hay que detectar
+    huecos de meses faltantes para no calcular una "variación mensual"
+    que en realidad es de 2+ meses.
+    """
     ind_name, ind_type = config["name"], config["type"]
     sub = df[(df["country_code"] == country_code) & (df["indicator"] == ind_name)].copy()
     sub = sub.sort_values("period").reset_index(drop=True)
@@ -53,6 +65,7 @@ INDICATOR_MAP = {
     "CO": {"name": "ipc_indice", "type": "level"},
     "UY": {"name": "ipc_indice", "type": "level"},
 }
+
 
 try:
     prices, ppp_factors, inflation = load_data()
@@ -99,6 +112,7 @@ if canasta_df.empty:
 else:
     canasta_por_pais = canasta_df.groupby("country")["price_usd_ppp"].mean().sort_values(ascending=False)
     n_items = len(items_comparables_resumen)
+
     pais_mas_caro = canasta_por_pais.index[0]
     pais_mas_barato = canasta_por_pais.index[-1]
     palabra_items = "ítem" if n_items == 1 else "ítems"
@@ -124,7 +138,7 @@ else:
         f"Metodología: promedio simple de USD PPP sobre los {n_items} ítems presentes en 2 o más "
         f"países (de un total de {items_por_pais_resumen.shape[0]} ítems investigados). "
         f"Los ítems que todavía no están confirmados en todos los países quedan fuera de este "
-        f"promedio hasta completarse."
+        f"promedio hasta completarse — ver pestaña 'Precios comparables' para el detalle."
     )
 
 st.divider()
@@ -137,19 +151,39 @@ with tab1:
     st.subheader("Precio en USD PPP por ítem y país")
 
     items_por_pais = prices.groupby("item_name")["country"].nunique()
-    items_comparables = sorted(items_por_pais[items_por_pais >= 2].index.tolist())
+    items_comparables = items_por_pais[items_por_pais >= 2].index.tolist()
 
     if not items_comparables:
         st.warning("No hay ítems presentes en 2 o más países todavía.")
     else:
-        seleccion = st.multiselect(
-            "Filtrar ítems (vacío = todos)",
-            options=items_comparables,
-            default=items_comparables,
-        )
-        seleccion = seleccion or items_comparables
+        comparables_base = prices[prices["item_name"].isin(items_comparables)].copy()
 
-        comparables_df = prices[prices["item_name"].isin(seleccion)].copy()
+        categorias_disponibles = sorted(comparables_base["category"].dropna().unique().tolist())
+        categoria_labels = {
+            "vivienda": "🏠 Vivienda",
+            "transporte": "🚌 Transporte",
+            "entretenimiento": "🎭 Entretenimiento",
+            "salud": "🏥 Salud",
+        }
+
+        categoria_elegida = st.selectbox(
+            "Categoría",
+            options=categorias_disponibles,
+            format_func=lambda c: categoria_labels.get(c, c.capitalize()),
+        )
+
+        items_de_la_categoria = sorted(
+            comparables_base[comparables_base["category"] == categoria_elegida]["item_name"].unique().tolist()
+        )
+
+        seleccion = st.multiselect(
+            "Filtrar ítems dentro de la categoría (vacío = todos)",
+            options=items_de_la_categoria,
+            default=items_de_la_categoria,
+        )
+        seleccion = seleccion or items_de_la_categoria
+
+        comparables_df = comparables_base[comparables_base["item_name"].isin(seleccion)].copy()
         comparables_df["País"] = comparables_df["country"].map(COUNTRY_NAMES)
 
         fig = px.bar(
@@ -161,15 +195,30 @@ with tab1:
             color_discrete_map={COUNTRY_NAMES[k]: v for k, v in COUNTRY_COLORS.items()},
             labels={"item_name": "", "price_usd_ppp": "USD (PPP)"},
         )
-        fig.update_layout(xaxis_tickangle=-30, height=550)
+        fig.update_layout(xaxis_tickangle=-30, height=500)
         st.plotly_chart(fig, width='stretch')
+
+        st.caption(
+            "**Nota metodológica:** el factor PPP usado acá es un ajuste a nivel de "
+            "toda la economía (Banco Mundial), no específico por producto. Esto significa "
+            "que un ítem puntual —sobre todo uno de bajo costo, como una entrada de cine o "
+            "un café— puede mostrar un valor en USD PPP que parece desproporcionado incluso "
+            "cuando el cálculo es correcto: refleja que ese ítem puntual es relativamente más "
+            "caro en ese país respecto a su propia canasta de consumo promedio, no un error "
+            "de datos. Para una lectura más estable, el Resumen Ejecutivo usa el promedio de "
+            "toda la canasta comparable, no un ítem aislado."
+        )
 
     with st.expander("Ver tabla completa"):
         tabla_detalle = prices[
             ["country", "category", "item_name", "price_local", "currency", "price_usd_ppp", "source"]
         ].sort_values(["item_name", "country"]).copy()
+        tabla_detalle.columns = [
+            "País", "Categoría", "Ítem", "Precio local", "Moneda", "USD (PPP)", "Fuente"
+        ]
+        tabla_detalle["País"] = tabla_detalle["País"].map(COUNTRY_NAMES)
 
-        tabla_detalle["source"] = tabla_detalle["source"].replace(
+        tabla_detalle["Fuente"] = tabla_detalle["Fuente"].replace(
             {"Fuente sin confirmar — pedir a Juani": "En proceso de verificación"}
         )
 
@@ -199,14 +248,15 @@ with tab2:
         st.metric(
             "Brecha promedio (PPP / nominal)",
             f"{gap_promedio:.1f}x",
-            help="Cuántas veces más 'caro' se ve un ítem en PPP respecto al nominal.",
+            help="Cuántas veces más 'caro' se ve un ítem en PPP respecto al nominal — refleja el dólar oficial subvaluado.",
         )
 
 with tab3:
     st.subheader("Inflación mensual comparada (%)")
     st.caption(
-        "Normalizado a la misma unidad entre las 4 fuentes. Los huecos de meses "
-        "faltantes se detectan y se excluyen en vez de mostrarse como variación mensual real."
+        "Normalizado a la misma unidad entre las 4 fuentes (2 dan el nivel del índice, "
+        "no la variación — se calcula acá). Los huecos de meses faltantes se detectan "
+        "y se excluyen en vez de mostrarse como variación mensual real."
     )
 
     meses_a_mostrar = st.slider("Meses a mostrar", min_value=6, max_value=48, value=24, step=6)
