@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: latampulse_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: latampulse
+      POSTGRES_PASSWORD: latampulse_dev
+      POSTGRES_DB: latampulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - latampulse_pgdata:/var/lib/postgresql/data
+
+volumes:
+  latampulse_pgdata:

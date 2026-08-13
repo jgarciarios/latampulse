@@ -453,12 +453,33 @@ def transform_indec(raw_path: Path) -> pd.DataFrame:
     logger.info(f"transform_indec: {len(result_df)} filas generadas desde {raw_path.name}")
     return result_df
 
+def _try_parse_price_local(raw_value):
+    """
+    Convierte price_local a float, manejando dos problemas reales
+    encontrados en research_template_1.xlsx:
+      1. Valores con coma decimal cargados como texto en Excel.
+      2. Celdas donde quedó una fecha en vez de un precio (Excel las
+         guarda como datetime.datetime) — se devuelve None para que el
+         llamador saltee la fila con un warning, no se adivina el precio.
+    """
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+    if isinstance(raw_value, str):
+        cleaned = raw_value.strip().replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 def compute_usd_values(prices_df: pd.DataFrame, exchange_rates_df: pd.DataFrame, ppp_factors_df: pd.DataFrame) -> pd.DataFrame:
     """
     Agrega price_usd_nominal y price_usd_ppp a un DataFrame de precios.
-    GAP CONOCIDO: solo hay exchange_rates para Argentina — para los otros
-    3 países, price_usd_nominal queda en None (con warning), nunca inventado.
-    price_usd_ppp sí cubre los 4 países vía World Bank.
+    Filas con price_local no numérico se ELIMINAN del resultado (con
+    warning), nunca se inventa el precio real.
     """
     df = prices_df.copy()
     df["price_usd_nominal"] = None
@@ -476,10 +497,24 @@ def compute_usd_values(prices_df: pd.DataFrame, exchange_rates_df: pd.DataFrame,
             f"price_usd_nominal va a quedar sin dato para esos países"
         )
 
+    filas_invalidas = []
     for idx, row in df.iterrows():
         country = row["country"]
-        price_local = row["price_local"]
+        price_local = _try_parse_price_local(row["price_local"])
         date_captured = pd.to_datetime(row["date_captured"])
+
+        if price_local is None:
+            item_name = row.get("item_name", "?")
+            logger.warning(
+                f"compute_usd_values: price_local inválido para "
+                f"'{item_name}' ({country}), fila índice {idx} — valor "
+                f"crudo: {row['price_local']!r}. Fila eliminada del "
+                f"resultado, revisar el Excel manualmente."
+            )
+            filas_invalidas.append(idx)
+            continue
+
+        df.at[idx, "price_local"] = price_local
 
         country_fx = fx_oficial[fx_oficial["country_code"] == country]
         if not country_fx.empty:
@@ -496,8 +531,13 @@ def compute_usd_values(prices_df: pd.DataFrame, exchange_rates_df: pd.DataFrame,
             if pd.notna(factor) and factor != 0:
                 df.at[idx, "price_usd_ppp"] = price_local / factor
 
+    filas_salteadas = len(filas_invalidas)
+    if filas_invalidas:
+        df = df.drop(index=filas_invalidas).reset_index(drop=True)
+
     logger.info(
-        f"compute_usd_values: {len(df)} filas procesadas — "
+        f"compute_usd_values: {len(df)} filas procesadas ({filas_salteadas} "
+        f"salteadas por price_local inválido) — "
         f"{df['price_usd_nominal'].notna().sum()} con USD nominal, "
         f"{df['price_usd_ppp'].notna().sum()} con USD PPP"
     )

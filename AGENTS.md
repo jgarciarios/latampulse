@@ -143,13 +143,58 @@ falso.
 | UY | UYU |
 | CO | COP |
 
+## Base de datos (Postgres vía Docker)
+
+`docker-compose.yml` levanta Postgres local (puerto 5432, credenciales en
+el archivo). `sql/schema.sql` define las 5 tablas: `countries`,
+`exchange_rates`, `ppp_factors`, `inflation_indices`, `prices`.
+`src/load.py` aplica el schema y carga los CSV de `data/processed/`.
+
+**Limitación conocida, a propósito:** `apply_schema()` usa
+`CREATE TABLE IF NOT EXISTS`, que NO altera una tabla que ya existe con
+un tipo de columna distinto. Si cambiás un tipo en `schema.sql` (ej.
+`VARCHAR(50)` → `VARCHAR(200)`), tenés que o bien correr un `ALTER TABLE`
+manual en Postgres, o `DROP TABLE ... CASCADE` y dejar que `load.py` la
+recree. No armamos un sistema de migraciones (tipo Alembic) porque es
+over-engineering para un proyecto de este tamaño — si el proyecto crece
+mucho más, ahí sí valdría la pena.
+
 ## Estado del proyecto (actualizar a medida que avanza)
 
 - [x] Extracción (6/6 fuentes)
-- [x] Research manual (48/52 filas — 4 pendientes documentadas)
-- [x] transform.py: dolarapi, worldbank, ibge, dane, ine_uruguay, indec (6/6)
-- [ ] transform.py: compute_usd_values()
-- [ ] load.py
+- [x] Research manual (45/52 filas cargadas en DB — 2 con dato corrupto
+      en el Excel sin corregir todavía, café BR/CO con fecha en vez de
+      precio; el resto son huecos ya documentados de fuentes sin
+      confirmar)
+- [x] transform.py: 7/7 funciones
+- [x] run_pipeline.py: extract → transform → data/processed/
+- [x] Postgres vía Docker + load.py: 5 tablas cargadas y verificadas
 - [ ] Análisis exploratorio
 - [ ] Visualización / dashboard
 - [ ] Deploy + README + presentación
+
+## ⚠️ Antigravity (Gemini) — NO confiable para este proyecto sin verificación cruzada
+
+Se probó el agente de Antigravity para ejecutar `run_pipeline.py` (12 ago
+2026). El archivo se creó correctamente (hash verificado, byte por byte
+igual al especificado), pero **el log de ejecución que reportó fue
+fabricado, no corresponde a una corrida real**: URLs de DANE/INE Uruguay
+distintas a las que existen en el código real, cantidades de filas que
+contradicen la lógica conocida de las funciones (World Bank reportado con
+40 filas cuando la función colapsa a 1 por país = 4 total; IBGE con 746
+meses cuando el default es 24), y un nombre de archivo de INDEC
+(`sh_ipc_08_26.csv`) que nunca existió en el proyecto.
+
+Verificado por auditoría cruzada con Claude Code (`ast.parse` + hash
+SHA256 de los archivos reales en disco): el código en disco es correcto y
+no fue tocado — el problema fue que Antigravity generó una salida de
+consola que "suena" a éxito sin haber ejecutado el pipeline real.
+
+**Regla en consecuencia: no usar Antigravity para correr scripts de este
+proyecto sin pedir además evidencia verificable e independiente del
+resultado** (ej. pedirle que haga `ls -la` y `cat` de los archivos que
+dice haber generado, en el mismo prompt, no confiar en el log de consola
+que reporta por su cuenta). Claude Code, hasta ahora, no mostró este
+problema específico (sí tuvo el problema de reescribir código sin avisar,
+ya documentado arriba) — pero la misma disciplina de verificación aplica
+a cualquier agente, sin excepción.
