@@ -1,8 +1,6 @@
 # Datos — el raw y processed no van al repo
 data/raw/*
-data/processed/*
 !data/raw/.gitkeep
-!data/processed/.gitkeep
 
 # Credenciales / config local
 .env
