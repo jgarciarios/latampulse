@@ -71,6 +71,64 @@ st.markdown(
     "(ajustado por poder de compra real) — la brecha entre ambos es la historia."
 )
 
+col_a, col_b = st.columns(2)
+with col_a:
+    st.info(
+        "**💵 USD nominal**\n\n"
+        "El precio convertido al tipo de cambio oficial del día — "
+        "lo que pagaría alguien con dólares reales, hoy."
+    )
+with col_b:
+    st.info(
+        "**⚖️ USD PPP** (Paridad de Poder de Compra)\n\n"
+        "El precio ajustado por lo que ese dinero realmente rinde "
+        "*dentro* de cada país. Corrige el hecho de que un dólar no "
+        "compra lo mismo en Buenos Aires que en Montevideo — es la "
+        "métrica que usan organismos como el Banco Mundial para "
+        "comparar economías de forma justa."
+    )
+
+st.header("📊 Resumen ejecutivo")
+
+items_por_pais_resumen = prices.groupby("item_name")["country"].nunique()
+items_comparables_resumen = items_por_pais_resumen[items_por_pais_resumen >= 2].index.tolist()
+canasta_df = prices[prices["item_name"].isin(items_comparables_resumen)]
+
+if canasta_df.empty:
+    st.info("Todavía no hay suficientes ítems comparables entre países para un resumen.")
+else:
+    canasta_por_pais = canasta_df.groupby("country")["price_usd_ppp"].mean().sort_values(ascending=False)
+    n_items = len(items_comparables_resumen)
+    pais_mas_caro = canasta_por_pais.index[0]
+    pais_mas_barato = canasta_por_pais.index[-1]
+    palabra_items = "ítem" if n_items == 1 else "ítems"
+
+    st.markdown(
+        f"**{COUNTRY_NAMES[pais_mas_caro]}** tiene el costo de vida más alto en términos de "
+        f"poder adquisitivo real (USD PPP), con un promedio de **USD {canasta_por_pais.iloc[0]:,.0f}** "
+        f"en una canasta de {n_items} {palabra_items} comparables entre los 4 países. "
+        f"**{COUNTRY_NAMES[pais_mas_barato]}** es el más económico, con un promedio de "
+        f"**USD {canasta_por_pais.iloc[-1]:,.0f}**."
+    )
+
+    cols = st.columns(len(canasta_por_pais))
+    for col, (country_code, valor) in zip(cols, canasta_por_pais.items()):
+        with col:
+            st.metric(
+                COUNTRY_NAMES[country_code],
+                f"USD {valor:,.0f}",
+                help=f"Promedio USD PPP sobre {n_items} ítems comparables",
+            )
+
+    st.caption(
+        f"Metodología: promedio simple de USD PPP sobre los {n_items} ítems presentes en 2 o más "
+        f"países (de un total de {items_por_pais_resumen.shape[0]} ítems investigados). "
+        f"Los ítems que todavía no están confirmados en todos los países quedan fuera de este "
+        f"promedio hasta completarse."
+    )
+
+st.divider()
+
 tab1, tab2, tab3, tab4 = st.tabs([
     "💵 Precios comparables", "⚖️ Nominal vs PPP", "📈 Inflación", "🌍 Poder adquisitivo"
 ])
@@ -107,11 +165,15 @@ with tab1:
         st.plotly_chart(fig, width='stretch')
 
     with st.expander("Ver tabla completa"):
-        st.dataframe(
-            prices[["country", "category", "item_name", "price_local", "currency", "price_usd_ppp", "source"]]
-            .sort_values(["item_name", "country"]),
-            width='stretch',
+        tabla_detalle = prices[
+            ["country", "category", "item_name", "price_local", "currency", "price_usd_ppp", "source"]
+        ].sort_values(["item_name", "country"]).copy()
+
+        tabla_detalle["source"] = tabla_detalle["source"].replace(
+            {"Fuente sin confirmar — pedir a Juani": "En proceso de verificación"}
         )
+
+        st.dataframe(tabla_detalle, width='stretch')
 
 with tab2:
     st.subheader("USD nominal vs USD PPP")
