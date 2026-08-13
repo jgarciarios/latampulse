@@ -162,16 +162,36 @@ mucho más, ahí sí valdría la pena.
 ## Estado del proyecto (actualizar a medida que avanza)
 
 - [x] Extracción (6/6 fuentes)
-- [x] Research manual (45/52 filas cargadas en DB — 2 con dato corrupto
-      en el Excel sin corregir todavía, café BR/CO con fecha en vez de
-      precio; el resto son huecos ya documentados de fuentes sin
-      confirmar)
+- [x] Research manual (44 filas limpias en DB — sin duplicados, sin
+      filas salteadas por error de formato)
 - [x] transform.py: 7/7 funciones
 - [x] run_pipeline.py: extract → transform → data/processed/
 - [x] Postgres vía Docker + load.py: 5 tablas cargadas y verificadas
-- [ ] Análisis exploratorio
+- [x] notebooks/01_exploratory_analysis.ipynb: 4 secciones (precios
+      comparables, nominal vs PPP, inflación normalizada, GDP per cápita
+      PPP), ejecutado de punta a punta con datos reales sin errores
 - [ ] Visualización / dashboard
 - [ ] Deploy + README + presentación
+
+## Lección del día: duplicados en el research manual por placeholders sin limpiar
+
+Durante varias rondas de carga manual, se cargaron filas placeholder
+("Fuente sin confirmar — pedir a Juani") que después se completaron con
+datos reales en una ronda posterior — pero las filas viejas nunca se
+borraron, quedando duplicadas (mismo item_name + country, valores
+distintos). Esto no rompe el pipeline (no hay constraint de unicidad en
+la tabla `prices`), pero infla conteos y puede distorsionar análisis
+agregados si no se detecta.
+
+**Regla en consecuencia:** cuando se reemplaza un placeholder por un dato
+real investigado, la fila vieja se ELIMINA del Excel, nunca se deja al
+lado de la nueva. Si en algún momento se sospecha de duplicados, correr:
+
+```python
+df[df.duplicated(subset=["item_name", "country"], keep=False)]
+```
+
+antes de dar por buena una carga.
 
 ## ⚠️ Antigravity (Gemini) — NO confiable para este proyecto sin verificación cruzada
 
