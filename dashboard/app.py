@@ -38,13 +38,6 @@ def load_data():
 
 
 def compute_monthly_pct(country_code: str, config: dict, df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normaliza las 4 fuentes de inflación a variación mensual (%) comparable.
-    Ver AGENTS.md para el detalle de por qué esto no es trivial: 2 de las
-    4 fuentes dan nivel de índice (no variación), y hay que detectar
-    huecos de meses faltantes para no calcular una "variación mensual"
-    que en realidad es de 2+ meses.
-    """
     ind_name, ind_type = config["name"], config["type"]
     sub = df[(df["country_code"] == country_code) & (df["indicator"] == ind_name)].copy()
     sub = sub.sort_values("period").reset_index(drop=True)
@@ -150,6 +143,67 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.subheader("Precio en USD PPP por ítem y país")
 
+    st.warning(
+        "⚠️ **Este gráfico NO muestra precios reales en dólares.**\n\n"
+        "Muestra qué tan cara es cada cosa *dentro* de cada país, comparada con el resto "
+        "de lo que se gasta ahí — no lo que pagarías vos con dólares en el bolsillo. "
+        "Un número alto acá quiere decir *'esto es caro para alguien que vive en ese país'*, "
+        "no *'esto cuesta esa cantidad de dólares'*.\n\n"
+        "👉 Para ver el precio real en dólares (lo que efectivamente pagarías), "
+        "andá a la pestaña **'Nominal vs PPP'**."
+    )
+
+    with st.expander("🔍 Ver la cuenta real, con un ejemplo concreto"):
+        ejemplo = prices[
+            (prices["country"] == "AR")
+            & (prices["item_name"].str.contains("cine", case=False, na=False))
+            & (prices["price_usd_nominal"].notna())
+        ]
+
+        if ejemplo.empty:
+            st.info(
+                "No hay un ejemplo con USD nominal calculado disponible todavía "
+                "para mostrar la cuenta paso a paso."
+            )
+        else:
+            fila = ejemplo.iloc[0]
+            precio_local = fila["price_local"]
+            moneda = fila["currency"]
+            usd_nominal = fila["price_usd_nominal"]
+            usd_ppp = fila["price_usd_ppp"]
+            tipo_cambio_implicito = precio_local / usd_nominal
+            factor_ppp_implicito = precio_local / usd_ppp
+
+            st.markdown(
+                f"**Ejemplo real: {fila['item_name']} en Argentina**\n\n"
+                f"El ticket dice **{moneda} {precio_local:,.0f}**. Hay dos formas "
+                f"distintas de pasar eso a dólares, según qué tasa uses:"
+            )
+
+            st.markdown(
+                f"| | Tasa usada | Cuenta | Resultado |\n"
+                f"|---|---|---|---|\n"
+                f"| 💵 **USD nominal** (lo que pagás de verdad) "
+                f"| ${tipo_cambio_implicito:,.0f} pesos por dólar — el tipo de cambio del mercado, hoy "
+                f"| {precio_local:,.0f} ÷ {tipo_cambio_implicito:,.0f} "
+                f"| **USD {usd_nominal:,.2f}** |\n"
+                f"| ⚖️ **USD PPP** (nuestra métrica de comparación) "
+                f"| ${factor_ppp_implicito:,.0f} pesos por dólar — un factor que publica el Banco Mundial "
+                f"| {precio_local:,.0f} ÷ {factor_ppp_implicito:,.0f} "
+                f"| **USD {usd_ppp:,.2f}** |"
+            )
+
+            st.markdown(
+                f"El Banco Mundial calcula esa segunda tasa (${factor_ppp_implicito:,.0f}) mirando "
+                f"cuánto cuesta vivir en Argentina en general — comida, alquiler, transporte, todo "
+                f"junto — comparado con Estados Unidos. Como en Argentina las cosas 'rinden más' en "
+                f"pesos de lo que el tipo de cambio oficial sugiere, esa tasa da un número más bajo "
+                f"que el tipo de cambio real, y por eso el resultado en 'dólares PPP' sale más alto. "
+                f"**Nadie paga USD {usd_ppp:,.2f} reales por esto** — es una forma de decir que, "
+                f"tomando como referencia el costo de vida general del país, este producto resulta "
+                f"relativamente más caro que el resto de las cosas que se compran ahí."
+            )
+
     items_por_pais = prices.groupby("item_name")["country"].nunique()
     items_comparables = items_por_pais[items_por_pais >= 2].index.tolist()
 
@@ -196,6 +250,7 @@ with tab1:
             labels={"item_name": "", "price_usd_ppp": "USD (PPP)"},
         )
         fig.update_layout(xaxis_tickangle=-30, height=500)
+        fig.update_traces(hovertemplate="%{x}<br>USD $%{y:,.2f}<extra></extra>")
         st.plotly_chart(fig, width='stretch')
 
         st.caption(
@@ -242,6 +297,7 @@ with tab2:
         fig.add_bar(name="USD nominal", x=ar_con_nominal["item_name"], y=ar_con_nominal["price_usd_nominal"])
         fig.add_bar(name="USD PPP", x=ar_con_nominal["item_name"], y=ar_con_nominal["price_usd_ppp"])
         fig.update_layout(barmode="group", xaxis_tickangle=-30, height=550, yaxis_title="USD")
+        fig.update_traces(hovertemplate="%{x}<br>USD $%{y:,.2f}<extra></extra>")
         st.plotly_chart(fig, width='stretch')
 
         gap_promedio = (ar_con_nominal["price_usd_ppp"] / ar_con_nominal["price_usd_nominal"]).mean()
@@ -265,6 +321,39 @@ with tab3:
     unified_inflation = pd.concat(series, ignore_index=True)
     unified_inflation["País"] = unified_inflation["country_code"].map(COUNTRY_NAMES)
 
+    resumen_inflacion = {}
+    for country_code in INDICATOR_MAP:
+        sub_resumen = unified_inflation[unified_inflation["country_code"] == country_code].sort_values("period")
+        sub_resumen = sub_resumen.tail(meses_a_mostrar)
+        if not sub_resumen.empty:
+            resumen_inflacion[country_code] = {
+                "promedio": sub_resumen["value"].mean(),
+                "ultimo_valor": sub_resumen["value"].iloc[-1],
+            }
+
+    if resumen_inflacion:
+        pais_mayor_inflacion = max(resumen_inflacion, key=lambda c: resumen_inflacion[c]["promedio"])
+        pais_menor_inflacion = min(resumen_inflacion, key=lambda c: resumen_inflacion[c]["promedio"])
+
+        st.markdown(
+            f"En los últimos {meses_a_mostrar} meses (según disponibilidad de cada fuente), "
+            f"**{COUNTRY_NAMES[pais_mayor_inflacion]}** tuvo la inflación mensual promedio más alta "
+            f"(**{resumen_inflacion[pais_mayor_inflacion]['promedio']:.2f}%**), mientras que "
+            f"**{COUNTRY_NAMES[pais_menor_inflacion]}** tuvo la más baja "
+            f"(**{resumen_inflacion[pais_menor_inflacion]['promedio']:.2f}%**)."
+        )
+
+        cols_inflacion = st.columns(len(resumen_inflacion))
+        for col, (country_code, stats) in zip(cols_inflacion, resumen_inflacion.items()):
+            with col:
+                st.metric(
+                    COUNTRY_NAMES[country_code],
+                    f"{stats['promedio']:.2f}% prom.",
+                    delta=f"{stats['ultimo_valor']:.2f}% último mes",
+                    delta_color="off",
+                    help=f"Promedio de variación mensual sobre los últimos {meses_a_mostrar} meses disponibles",
+                )
+
     fig = go.Figure()
     for country_code in INDICATOR_MAP:
         sub = unified_inflation[unified_inflation["country_code"] == country_code].sort_values("period")
@@ -276,6 +365,7 @@ with tab3:
         )
     fig.add_hline(y=0, line_color="gray", line_width=0.8)
     fig.update_layout(height=550, yaxis_title="Variación mensual (%)", xaxis_title="")
+    fig.update_traces(hovertemplate="%{x|%b %Y}<br>%{fullData.name}: %{y:.2f}%<extra></extra>")
     st.plotly_chart(fig, width='stretch')
 
 with tab4:
@@ -283,6 +373,26 @@ with tab4:
 
     ppp_sorted = ppp_factors.sort_values("gdp_per_capita_ppp_current", ascending=False).copy()
     ppp_sorted["País"] = ppp_sorted["country_code"].map(COUNTRY_NAMES)
+
+    if not ppp_sorted.empty:
+        pais_top = ppp_sorted.iloc[0]
+        pais_bottom = ppp_sorted.iloc[-1]
+        st.markdown(
+            f"**{COUNTRY_NAMES[pais_top['country_code']]}** tiene el poder adquisitivo per cápita "
+            f"más alto de los 4 países (**USD {pais_top['gdp_per_capita_ppp_current']:,.0f}** PPP, "
+            f"año {int(pais_top['year'])}), mientras que "
+            f"**{COUNTRY_NAMES[pais_bottom['country_code']]}** tiene el más bajo "
+            f"(**USD {pais_bottom['gdp_per_capita_ppp_current']:,.0f}**)."
+        )
+
+        cols_ppp = st.columns(len(ppp_sorted))
+        for col, (_, fila) in zip(cols_ppp, ppp_sorted.iterrows()):
+            with col:
+                st.metric(
+                    fila["País"],
+                    f"USD {fila['gdp_per_capita_ppp_current']:,.0f}",
+                    help=f"GDP per cápita, PPP — año {int(fila['year'])}",
+                )
 
     fig = px.bar(
         ppp_sorted, x="País", y="gdp_per_capita_ppp_current",
@@ -293,6 +403,7 @@ with tab4:
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(height=500, showlegend=False)
+    fig.update_traces(hovertemplate="%{x}<br>USD $%{y:,.2f}<extra></extra>")
     st.plotly_chart(fig, width='stretch')
 
 st.divider()
