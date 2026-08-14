@@ -136,8 +136,8 @@ else:
 
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "💵 Precios comparables", "⚖️ Nominal vs PPP", "📈 Inflación", "🌍 Poder adquisitivo"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "💵 Precios comparables", "⚖️ Nominal vs PPP", "📈 Inflación", "🌍 Poder adquisitivo", "🔗 Síntesis"
 ])
 
 with tab1:
@@ -405,6 +405,87 @@ with tab4:
     fig.update_layout(height=500, showlegend=False)
     fig.update_traces(hovertemplate="%{x}<br>USD $%{y:,.2f}<extra></extra>")
     st.plotly_chart(fig, width='stretch')
+
+with tab5:
+    st.subheader("🔗 ¿El país más caro es también el que más inflaciona?")
+    st.caption(
+        "Cruce entre costo de vida (canasta PPP), inflación acumulada de los últimos "
+        "12 meses, y poder adquisitivo per cápita — las 3 métricas centrales del "
+        "proyecto, juntas por primera vez."
+    )
+
+    items_por_pais_s = prices.groupby("item_name")["country"].nunique()
+    items_comparables_s = items_por_pais_s[items_por_pais_s >= 2].index.tolist()
+    canasta_s = prices[prices["item_name"].isin(items_comparables_s)]
+    costo_vida_por_pais = canasta_s.groupby("country")["price_usd_ppp"].mean()
+
+    def inflacion_acumulada(country_code, config, df, n_meses=12):
+        sub = compute_monthly_pct(country_code, config, df)
+        sub = sub.sort_values("period").tail(n_meses)
+        if sub.empty:
+            return None, 0
+        factor = (1 + sub["value"] / 100).prod()
+        return (factor - 1) * 100, len(sub)
+
+    inflacion_por_pais = {}
+    meses_reales = {}
+    for country_code, cfg in INDICATOR_MAP.items():
+        valor, n = inflacion_acumulada(country_code, cfg, inflation)
+        inflacion_por_pais[country_code] = valor
+        meses_reales[country_code] = n
+
+    gdp_por_pais = ppp_factors.set_index("country_code")["gdp_per_capita_ppp_current"]
+
+    sintesis = pd.DataFrame({
+        "Costo de vida (USD PPP)": costo_vida_por_pais,
+        "Inflación acum. 12m (%)": pd.Series(inflacion_por_pais),
+        "GDP per cápita (USD PPP)": gdp_por_pais,
+        "Meses de inflación usados": pd.Series(meses_reales),
+    })
+    sintesis.index.name = "country_code"
+    sintesis["País"] = sintesis.index.map(COUNTRY_NAMES)
+    sintesis["Rank costo de vida"] = sintesis["Costo de vida (USD PPP)"].rank(ascending=False)
+    sintesis["Rank inflación"] = sintesis["Inflación acum. 12m (%)"].rank(ascending=False)
+
+    if sintesis["Costo de vida (USD PPP)"].notna().any() and sintesis["Inflación acum. 12m (%)"].notna().any():
+        pais_mas_caro_s = sintesis.loc[sintesis["Rank costo de vida"] == 1, "País"].iloc[0]
+        pais_mas_inflacion_s = sintesis.loc[sintesis["Rank inflación"] == 1, "País"].iloc[0]
+        mismo_pais = pais_mas_caro_s == pais_mas_inflacion_s
+
+        st.markdown(
+            f"**El país con el costo de vida más alto** (canasta PPP) es **{pais_mas_caro_s}**. "
+            f"**El país con mayor inflación acumulada** en los últimos 12 meses es "
+            f"**{pais_mas_inflacion_s}**"
+            + (
+                " — son el mismo país. Es un patrón consistente con la intuición económica: "
+                "una inflación alta y sostenida empuja los precios relativos hacia arriba."
+                if mismo_pais else
+                ", un país distinto. El costo de vida en PPP no está determinado solo por "
+                "la inflación del último año — también pesan factores estructurales de la "
+                "economía (el factor PPP del Banco Mundial resume varios años de historia, "
+                "no solo los últimos 12 meses)."
+            )
+        )
+
+    st.dataframe(
+        sintesis[[
+            "País", "Costo de vida (USD PPP)", "Inflación acum. 12m (%)",
+            "GDP per cápita (USD PPP)", "Meses de inflación usados",
+        ]].sort_values("Costo de vida (USD PPP)", ascending=False),
+        width='stretch',
+        column_config={
+            "Costo de vida (USD PPP)": st.column_config.NumberColumn(format="$%.0f"),
+            "Inflación acum. 12m (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "GDP per cápita (USD PPP)": st.column_config.NumberColumn(format="$%.0f"),
+        },
+    )
+
+    st.warning(
+        "⚠️ **Con solo 4 países, esto es una comparación descriptiva, no una correlación "
+        "estadísticamente significativa.** Un análisis de correlación confiable necesita "
+        "muchas más observaciones — acá se muestra el ranking para dar contexto y generar "
+        "hipótesis, no como prueba de causalidad."
+    )
 
 st.divider()
 st.caption(
