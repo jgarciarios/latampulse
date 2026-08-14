@@ -502,6 +502,7 @@ def compute_usd_values(prices_df: pd.DataFrame, exchange_rates_df: pd.DataFrame,
         country = row["country"]
         price_local = _try_parse_price_local(row["price_local"])
         date_captured = pd.to_datetime(row["date_captured"])
+        currency = row.get("currency", None)
 
         if price_local is None:
             item_name = row.get("item_name", "?")
@@ -515,6 +516,16 @@ def compute_usd_values(prices_df: pd.DataFrame, exchange_rates_df: pd.DataFrame,
             continue
 
         df.at[idx, "price_local"] = price_local
+
+        if currency == "USD":
+            df.at[idx, "price_usd_nominal"] = price_local
+            logger.warning(
+                f"compute_usd_values: '{row.get('item_name', '?')}' ({country}) "
+                f"ya está en USD — price_usd_ppp queda sin dato porque no "
+                f"tenemos tipo de cambio de {country} para volver a moneda "
+                f"local y aplicar el factor PPP correctamente."
+            )
+            continue
 
         country_fx = fx_oficial[fx_oficial["country_code"] == country]
         if not country_fx.empty:
