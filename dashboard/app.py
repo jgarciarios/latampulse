@@ -134,6 +134,13 @@ else:
         f"promedio hasta completarse — ver pestaña 'Precios comparables' para el detalle."
     )
 
+    if "source" in prices.columns:
+        sin_confirmar = (prices["source"] == "Fuente sin confirmar — pedir a Juani").sum()
+        confirmadas = len(prices) - sin_confirmar
+        pct_confirmado = 100 * confirmadas / len(prices) if len(prices) > 0 else 0
+        st.caption(f"📋 **Calidad de datos:** {confirmadas}/{len(prices)} precios con fuente confirmada ({pct_confirmado:.0f}%)")
+        st.progress(pct_confirmado / 100)
+
 st.divider()
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -278,6 +285,14 @@ with tab1:
         )
 
         st.dataframe(tabla_detalle, width='stretch')
+
+        csv_bytes = tabla_detalle.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Descargar esta tabla como CSV",
+            data=csv_bytes,
+            file_name="latampulse_precios.csv",
+            mime="text/csv",
+        )
 
 with tab2:
     st.subheader("USD nominal vs USD PPP")
