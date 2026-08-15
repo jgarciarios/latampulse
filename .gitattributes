@@ -1,0 +1,6 @@
+# El notebook pesa mucho por los gráficos embebidos y distorsiona las
+# estadísticas de "Languages" de GitHub (contaba como 80%+ Jupyter
+# Notebook, cuando el trabajo real es ingeniería en Python). Con esto,
+# GitHub deja de contarlo para esas estadísticas, sin dejar de mostrarlo
+# ni funcionar normalmente.
+*.ipynb linguist-vendored
