@@ -508,3 +508,11 @@ st.caption(
     "y research manual verificado con fuente y fecha por precio. "
     "Metodología completa en AGENTS.md del repositorio."
 )
+st.markdown(
+    "<div style='text-align: center; opacity: 0.6; padding-top: 1rem;'>"
+    "Hecho por <strong>Juan Ignacio García Ríos</strong> · "
+    "<a href='https://github.com/jgarciarios' target='_blank'>GitHub</a> · "
+    "<a href='https://www.linkedin.com/in/juan-ignacio-garcia-rios-902749239/' target='_blank'>LinkedIn</a>"
+    "</div>",
+    unsafe_allow_html=True,
+)
