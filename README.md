@@ -1,5 +1,7 @@
 # LatamPulse
 
+**🔗 [Ver dashboard en vivo →](https://latampulse.streamlit.app)**
+
 **¿Cuánto cuesta vivir en Argentina, Brasil, Uruguay y Colombia — y qué tan lejos llega realmente un sueldo en cada país?**
 
 Pipeline de datos de punta a punta que extrae, limpia y compara costo de vida y poder adquisitivo entre 4 países de Latinoamérica, combinando fuentes oficiales (bancos centrales, institutos de estadística, Banco Mundial) con research de precios cotidianos verificado a mano.
@@ -75,6 +77,10 @@ LatamPulse/
 ```
 
 ## Setup
+
+**Para solo ver el resultado:** entrá directo a [latampulse.streamlit.app](https://latampulse.streamlit.app), no hace falta instalar nada.
+
+**Para correr el proyecto completo** (pipeline de extracción + base de datos + notebook):
 
 ```bash
 # 1. Entorno
